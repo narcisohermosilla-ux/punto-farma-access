@@ -92,6 +92,43 @@
         </div>
     </div>
 
+    <!-- MI CUENTA -->
+    <div class="modal fade" id="modalMiCuenta" tabindex="-1">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header bg-danger text-white">
+                    <h5 class="modal-title fw-bold"><i class="fa-solid fa-user-gear"></i> Mi Cuenta</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <p class="mb-1"><strong id="cuenta-nombre">-</strong></p>
+                    <p class="text-muted mb-3" id="cuenta-rol">-</p>
+                    <hr>
+                    <h6 class="fw-bold">Cambiar Contraseña</h6>
+                    <form id="formCambiarPassword">
+                        <div class="mb-2">
+                            <label class="form-label small">Contraseña Actual</label>
+                            <input type="password" class="form-control" id="pass-actual" required>
+                        </div>
+                        <div class="mb-2">
+                            <label class="form-label small">Nueva Contraseña</label>
+                            <input type="password" class="form-control" id="pass-nueva" required minlength="4">
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label small">Confirmar Nueva Contraseña</label>
+                            <input type="password" class="form-control" id="pass-confirmar" required minlength="4">
+                        </div>
+                        <button type="submit" class="btn btn-danger w-100"><i class="fa-solid fa-key"></i> Actualizar Contraseña</button>
+                    </form>
+                </div>
+                <div class="modal-footer d-flex justify-content-between">
+                    <button type="button" class="btn btn-outline-dark" onclick="logout()"><i class="fa-solid fa-power-off"></i> Cerrar Sesión</button>
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cerrar</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- LOGIN -->
     <div id="login-screen">
         <div class="card p-4 shadow-lg w-100" style="max-width: 400px;">
@@ -139,6 +176,9 @@
                     <span class="badge bg-danger p-2" id="user-role-badge">Rol</span>
                     <span class="ms-2 fw-semibold" id="user-display-name">Usuario</span>
                 </div>
+                <button class="btn btn-sm btn-outline-secondary" id="btn-user-menu" onclick="abrirMenuUsuario()" title="Mi cuenta">
+                    <i class="fa-solid fa-user-gear"></i>
+                </button>
             </div>
 
             <!-- DASHBOARD -->
@@ -517,6 +557,26 @@
         let activeUser = null;
         let chartInstance1 = null; let chartInstance2 = null;
 
+        // Guarda la sesión activa en el navegador para que sobreviva a un refresh
+        function guardarSesion(user) { localStorage.setItem('pf_session', JSON.stringify(user)); }
+        function borrarSesion() { localStorage.removeItem('pf_session'); }
+
+        function entrarComoUsuario(user) {
+            activeUser = user;
+            document.getElementById('login-screen').style.display = 'none'; document.getElementById('wrapper').style.display = 'flex';
+            document.getElementById('user-display-name').innerText = user.nombre; document.getElementById('user-role-badge').innerText = user.rol.toUpperCase();
+            document.getElementById('cuenta-nombre').innerText = user.nombre; document.getElementById('cuenta-rol').innerText = `Usuario: ${user.username} · Rol: ${user.rol.toUpperCase()}`;
+            construirMenusPorRol(user.rol);
+        }
+
+        // Al cargar la página, si ya había una sesión guardada, entra directo sin pedir login otra vez
+        function restaurarSesionSiExiste() {
+            const guardada = localStorage.getItem('pf_session');
+            if (guardada) { try { entrarComoUsuario(JSON.parse(guardada)); return true; } catch(e) { borrarSesion(); } }
+            return false;
+        }
+        restaurarSesionSiExiste();
+
         // === 2. LOGIN & ROLES ===
         document.getElementById('loginForm').addEventListener('submit', async function(e) {
             e.preventDefault();
@@ -530,15 +590,38 @@
                     .eq('password', p)
                     .maybeSingle();
                 if (user) {
-                    activeUser = user; await logAuditoria("LOGIN_EXITOSO", `Inicio de sesión.`);
-                    document.getElementById('login-screen').style.display = 'none'; document.getElementById('wrapper').style.display = 'flex';
-                    document.getElementById('user-display-name').innerText = user.nombre; document.getElementById('user-role-badge').innerText = user.rol.toUpperCase();
-                    construirMenusPorRol(user.rol);
+                    guardarSesion(user); entrarComoUsuario(user); await logAuditoria("LOGIN_EXITOSO", `Inicio de sesión.`);
                 } else { alert("Usuario o Contraseña incorrectos."); await logAuditoria("LOGIN_FALLIDO", `Intento fallido: ${u}`); }
             } catch(error) { console.error(error); alert("Error validando el usuario."); }
         });
 
-        function logout() { logAuditoria("LOGOUT", `Cierre de sesión.`).then(() => { location.reload(); }); }
+        // === MI CUENTA: abrir modal, cambiar contraseña, logout ===
+        function abrirMenuUsuario() {
+            const modal = new bootstrap.Modal(document.getElementById('modalMiCuenta'));
+            document.getElementById('formCambiarPassword').reset();
+            modal.show();
+        }
+
+        document.getElementById('formCambiarPassword').addEventListener('submit', async function(e) {
+            e.preventDefault();
+            const actual = document.getElementById('pass-actual').value;
+            const nueva = document.getElementById('pass-nueva').value;
+            const confirmar = document.getElementById('pass-confirmar').value;
+
+            if (actual !== activeUser.password) { alert("La contraseña actual no es correcta."); return; }
+            if (nueva !== confirmar) { alert("La nueva contraseña y su confirmación no coinciden."); return; }
+            if (nueva === actual) { alert("La nueva contraseña debe ser distinta a la actual."); return; }
+
+            const { error } = await sb.from('usuarios').update({ password: nueva }).eq('id', activeUser.id);
+            if (error) { console.error(error); alert("No se pudo actualizar la contraseña."); return; }
+
+            activeUser.password = nueva; guardarSesion(activeUser);
+            await logAuditoria("CAMBIO_PASSWORD", `El usuario ${activeUser.username} actualizó su contraseña.`);
+            alert("✅ Contraseña actualizada correctamente.");
+            bootstrap.Modal.getInstance(document.getElementById('modalMiCuenta')).hide();
+        });
+
+        function logout() { logAuditoria("LOGOUT", `Cierre de sesión.`).then(() => { borrarSesion(); location.reload(); }); }
 
         function construirMenusPorRol(rol) {
             const sidebar = document.getElementById('sidebar-menu'); const bottom = document.getElementById('bottom-nav');
