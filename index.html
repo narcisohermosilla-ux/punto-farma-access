@@ -1,0 +1,934 @@
+<!DOCTYPE html>
+<html lang="es" data-bs-theme="light">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Punto Farma Access</title>
+    
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Se agrega el JS de Bootstrap para permitir ventanas emergentes (Modales) -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.sheetjs.com/xlsx-latest/package/dist/xlsx.full.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+    <style>
+        :root { --primary-color: #dc3545; --sidebar-width: 260px; --bottom-nav-height: 65px; }
+        body { font-family: 'Segoe UI', system-ui, -apple-system, sans-serif; background-color: #f4f7f6; overflow-x: hidden; -webkit-tap-highlight-color: transparent; }
+        [data-bs-theme="dark"] body { background-color: #121212; color: #ffffff; }
+        
+        #wrapper { display: flex; width: 100vw; height: 100vh; overflow: hidden; }
+        #content-wrapper { flex: 1; display: flex; flex-direction: column; overflow-y: auto; padding-bottom: 20px; }
+
+        #sidebar { width: var(--sidebar-width); background: #1e2229; color: #fff; display: flex; flex-direction: column; transition: all 0.3s; }
+        #sidebar .nav-link { color: #adb5bd; padding: 14px 20px; border-radius: 0; display: flex; align-items: center; cursor: pointer; }
+        #sidebar .nav-link:hover, #sidebar .nav-link.active { background: var(--primary-color); color: #fff; border-left: 4px solid #fff; }
+
+        #bottom-nav { display: none; position: fixed; bottom: 0; left: 0; right: 0; height: var(--bottom-nav-height); background: #1e2229; z-index: 1030; box-shadow: 0 -2px 10px rgba(0,0,0,0.15); }
+        #bottom-nav .nav-link { flex: 1; color: #adb5bd; text-align: center; font-size: 11px; padding: 8px 0; display: flex; flex-direction: column; align-items: center; justify-content: center; cursor: pointer; }
+        #bottom-nav .nav-link.active { color: #fff; background: var(--primary-color); }
+
+        .topbar { background: #fff; box-shadow: 0 2px 4px rgba(0,0,0,0.05); padding: 15px 20px; display: flex; justify-content: space-between; align-items: center; }
+        [data-bs-theme="dark"] .topbar { background: #1e1e1e; border-bottom: 1px solid #2d2d2d; }
+
+        .app-section { display: none; padding: 15px; }
+        .app-section.active { display: block; animation: fadeIn 0.25s ease; }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+
+        .photo-slot { width: 100%; max-width: 200px; height: 120px; background: #2c3034; color: #fff; border-radius: 8px; display: flex; align-items: center; justify-content: center; overflow: hidden; position: relative; border: 2px dashed #6c757d; cursor: pointer; transition: 0.2s; }
+        .photo-slot:hover { border-color: var(--primary-color); }
+        .photo-slot img { width: 100%; height: 100%; object-fit: cover; z-index: 2; }
+        .photo-slot .icon-overlay { position: absolute; z-index: 1; display: flex; flex-direction: column; align-items: center; opacity: 0.7; }
+        
+        #login-screen { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: #121212; z-index: 9999; display: flex; justify-content: center; align-items: center; padding: 15px; }
+
+        /* Estilos para miniaturas e imágenes en el modal de auditoría */
+        .thumb-img { width: 120px; height: 80px; object-fit: cover; border-radius: 5px; cursor: pointer; border: 2px solid #ccc; transition: 0.2s; background: #eee; }
+        .thumb-img:hover { border-color: var(--primary-color); transform: scale(1.05); }
+        
+        /* Visor de imágenes pantalla completa (Lightbox) */
+        #lightbox { display: none; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0,0,0,0.9); z-index: 10500; align-items: center; justify-content: center; flex-direction: column; backdrop-filter: blur(5px); }
+        #lightbox img { max-width: 95%; max-height: 90vh; border-radius: 8px; box-shadow: 0 0 25px rgba(0,0,0,0.8); }
+        #lightbox .close-btn { position: absolute; top: 20px; right: 30px; font-size: 45px; color: white; cursor: pointer; font-weight: bold; text-shadow: 0 0 10px #000; }
+
+        @media (max-width: 768px) {
+            #sidebar { display: none !important; }
+            #bottom-nav { display: flex !important; }
+            #content-wrapper { padding-bottom: calc(var(--bottom-nav-height) + 10px); }
+            .topbar #user-info-desktop { display: none; }
+        }
+    </style>
+</head>
+<body>
+
+    <input type="file" accept="image/*" capture="environment" id="native-camera-input" class="d-none">
+    <input type="file" accept=".json" id="import-db-file" class="d-none" onchange="procesarImportacionBD(event)">
+
+    <!-- VISOR DE IMÁGENES (LIGHTBOX) -->
+    <div id="lightbox" onclick="cerrarImagen(event)">
+        <span class="close-btn" onclick="cerrarImagen(event)">&times;</span>
+        <img id="lightbox-img" src="" onclick="event.stopPropagation()">
+    </div>
+
+    <!-- MODAL DETALLES DEL REGISTRO -->
+    <div class="modal fade" id="modalDetalle" tabindex="-1">
+        <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable">
+            <div class="modal-content">
+                <div class="modal-header bg-danger text-white">
+                    <h5 class="modal-title fw-bold"><i class="fa-solid fa-clipboard-check"></i> Detalle de Accesos</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body" id="modalDetalleCuerpo">
+                    <!-- Los datos se inyectarán aquí mediante JavaScript -->
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cerrar</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- LOGIN -->
+    <div id="login-screen">
+        <div class="card p-4 shadow-lg w-100" style="max-width: 400px;">
+            <div class="text-center mb-4">
+                <i class="fa-solid fa-truck-medical fa-3x text-danger mb-2"></i>
+                <h4 class="fw-bold">Punto Farma Access</h4>
+                <p class="text-muted small">Control Corporativo y Auditoría</p>
+            </div>
+            <form id="loginForm">
+                <div class="form-floating mb-3">
+                    <input type="text" id="username" class="form-control border-danger" placeholder="usuario" required value="admin">
+                    <label>Usuario</label>
+                </div>
+                <div class="form-floating mb-3">
+                    <input type="password" id="password" class="form-control border-danger" placeholder="pass" required value="admin">
+                    <label>Contraseña</label>
+                </div>
+                <button type="submit" id="btn-auth" class="btn btn-danger w-100 btn-lg">Acceder <i class="fa-solid fa-arrow-right"></i></button>
+            </form>
+        </div>
+    </div>
+
+    <!-- MAIN APP -->
+    <div id="wrapper" style="display: none;">
+        
+        <!-- SIDEBAR -->
+        <div id="sidebar">
+            <div class="p-4 text-center border-bottom border-secondary">
+                <i class="fa-solid fa-truck-medical fa-2x mb-2 text-danger"></i>
+                <h5 class="m-0 fw-bold">PF Access</h5>
+            </div>
+            <nav class="nav flex-column mt-2" id="sidebar-menu"></nav>
+            <div class="mt-auto p-3 border-top border-secondary">
+                <button class="btn btn-sm btn-outline-light w-100 mb-2" onclick="toggleTheme()"><i class="fa-solid fa-circle-half-stroke"></i> Tema</button>
+                <button class="btn btn-sm btn-danger w-100" onclick="logout()"><i class="fa-solid fa-power-off"></i> Salir</button>
+            </div>
+        </div>
+        <div id="bottom-nav" id="mobile-menu"></div>
+
+        <!-- CONTENT -->
+        <div id="content-wrapper">
+            <div class="topbar">
+                <h5 id="page-title" class="m-0 fw-bold">Cargando...</h5>
+                <div id="user-info-desktop">
+                    <span class="badge bg-danger p-2" id="user-role-badge">Rol</span>
+                    <span class="ms-2 fw-semibold" id="user-display-name">Usuario</span>
+                </div>
+            </div>
+
+            <!-- DASHBOARD -->
+            <div id="dashboard" class="app-section">
+                <!-- Personas Desglose -->
+                <div class="row g-2 mb-3">
+                    <div class="col-12">
+                        <div class="card p-3 shadow-sm border-0 border-start border-danger border-4">
+                            <h6 class="text-muted fw-bold mb-1"><i class="fa-solid fa-users text-danger"></i> PERSONAS ACTUALMENTE EN EL PREDIO</h6>
+                            <h2 id="kpi-personas-dentro" class="fw-bold m-0 text-danger">0 Personas</h2>
+                            <div id="kpi-personas-desglose" class="mt-2 d-flex gap-2 flex-wrap"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- KPI Cards -->
+                <div class="row g-2 mb-3 row-cols-2 row-cols-md-5">
+                    <div class="col">
+                        <div class="card p-3 shadow-sm border-0 border-start border-secondary border-4 h-100">
+                            <span class="text-muted small fw-bold">AGENDADOS HOY</span>
+                            <h3 id="kpi-agendados" class="fw-bold m-0 text-secondary">0</h3>
+                        </div>
+                    </div>
+                    <div class="col">
+                        <div class="card p-3 shadow-sm border-0 border-start border-primary border-4 h-100">
+                            <span class="text-muted small fw-bold">INGRESOS HOY</span>
+                            <h3 id="kpi-ingresos" class="fw-bold m-0 text-primary">0</h3>
+                        </div>
+                    </div>
+                    <div class="col">
+                        <div class="card p-3 shadow-sm border-0 border-start border-warning border-4 h-100">
+                            <span class="text-muted small fw-bold">VEHÍCULOS DENTRO</span>
+                            <h3 id="kpi-dentro" class="fw-bold m-0 text-warning">0</h3>
+                            <div class="progress mt-2" style="height: 6px;">
+                                <div id="kpi-semaforo" class="progress-bar bg-success" role="progressbar" style="width: 0%"></div>
+                            </div>
+                            <small id="kpi-semaforo-text" class="text-muted mt-1 d-block" style="font-size: 10px;">0 / 100 Autos</small>
+                        </div>
+                    </div>
+                    <div class="col">
+                        <div class="card p-3 shadow-sm border-0 border-start border-success border-4 h-100">
+                            <span class="text-muted small fw-bold">SALIDAS HOY</span>
+                            <h3 id="kpi-salidas" class="fw-bold m-0 text-success">0</h3>
+                        </div>
+                    </div>
+                    <div class="col">
+                        <div class="card p-3 shadow-sm border-0 border-start border-info border-4 h-100">
+                            <span class="text-muted small fw-bold">T. PROMEDIO</span>
+                            <h3 id="kpi-tiempo" class="fw-bold m-0 text-info">0m</h3>
+                        </div>
+                    </div>
+                </div>
+                <div class="row g-3">
+                    <div class="col-12 col-md-8"><div class="card p-3 shadow-sm border-0"><canvas id="chartIngresos" style="max-height: 220px;"></canvas></div></div>
+                    <div class="col-12 col-md-4"><div class="card p-3 shadow-sm border-0"><canvas id="chartTipos" style="max-height: 220px;"></canvas></div></div>
+                </div>
+            </div>
+
+            <!-- REGISTRO DE INGRESO -->
+            <div id="ingreso" class="app-section">
+                <div class="card p-3 shadow-sm border-0 mb-3 bg-light-subtle">
+                    <label class="fw-bold mb-1 small"><i class="fa-solid fa-calendar-check text-success"></i> Buscar Agendamiento Previo:</label>
+                    <div class="input-group">
+                        <input type="text" id="search-agendado-ci" class="form-control form-control-sm" placeholder="Ingrese Cédula del visitante">
+                        <button class="btn btn-sm btn-success" type="button" onclick="buscarAgendamiento()"><i class="fa-solid fa-magnifying-glass"></i> Buscar</button>
+                    </div>
+                </div>
+
+                <form id="formIngreso" class="card shadow-sm border-0 p-3">
+                    <h5 class="fw-bold text-danger mb-3"><i class="fa-solid fa-door-open"></i> Registro de Entrada</h5>
+                    <div class="row">
+                        <!-- Datos Persona -->
+                        <div class="col-12 col-md-6 mb-3">
+                            <label class="form-label fw-bold small text-secondary">Datos de la Persona Principal</label>
+                            <input type="text" id="in-nombre" class="form-control mb-2" placeholder="Nombre completo *" required>
+                            <input type="text" id="in-cedula" class="form-control mb-2 border-danger" placeholder="Cédula de Identidad *" required>
+                            <input type="text" id="in-empresa" class="form-control mb-2" placeholder="Empresa / Procedencia">
+                            <input type="text" id="in-motivo" class="form-control mb-2" placeholder="Motivo de Visita / Destino">
+                            
+                            <div class="mt-2">
+                                <label class="small d-block text-muted mb-1 fw-bold">Foto del Documento (C.I.)</label>
+                                <div class="photo-slot" onclick="openNativeCamera('in-foto-ci-img', 'in-foto-ci-data')">
+                                    <div class="icon-overlay"><i class="fa-solid fa-camera fa-2x mb-1"></i><small>Capturar C.I.</small></div>
+                                    <img id="in-foto-ci-img" src="">
+                                </div>
+                                <input type="hidden" id="in-foto-ci-data">
+                            </div>
+                        </div>
+                        
+                        <!-- Datos Vehículo (Con Switch Toggle) -->
+                        <div class="col-12 col-md-6 mb-3 border-start">
+                            <div class="d-flex justify-content-between align-items-center mb-3 p-2 bg-light rounded">
+                                <label class="form-label fw-bold small text-secondary m-0"><i class="fa-solid fa-car"></i> Medio de Ingreso</label>
+                                <div class="form-check form-switch m-0">
+                                    <input class="form-check-input bg-danger border-danger" type="checkbox" id="in-con-vehiculo" checked onchange="toggleVehiculoFields()">
+                                    <label class="form-check-label fw-bold small" for="in-con-vehiculo">En Vehículo</label>
+                                </div>
+                            </div>
+
+                            <!-- Contenedor Vehículo -->
+                            <div id="vehiculo-fields">
+                                <input type="text" id="in-chapa" class="form-control mb-2 fw-bold text-uppercase" placeholder="Chapa / Matrícula Vehicular *" required>
+                                <div class="row g-2 mb-2">
+                                    <div class="col-6"><input type="text" id="in-marca" class="form-control" placeholder="Marca / Modelo"></div>
+                                    <div class="col-6">
+                                        <select id="in-tipo" class="form-select">
+                                            <option value="Particular">Particular</option>
+                                            <option value="Corporativo">Corporativo</option>
+                                            <option value="Proveedor">Proveedor</option>
+                                            <option value="Servicios">Empresa de Servicios</option>
+                                            <option value="Funcionario">Funcionario</option>
+                                        </select>
+                                    </div>
+                                </div>
+                                <textarea id="in-obs" class="form-control mb-2" rows="2" placeholder="Observaciones físicas (Rayones, estado)"></textarea>
+                                
+                                <div>
+                                    <label class="small d-block text-muted mb-1 fw-bold">Foto del Vehículo / Chapa</label>
+                                    <div class="photo-slot" style="max-width:100%;" onclick="openNativeCamera('in-foto-auto-img', 'in-foto-auto-data')">
+                                        <div class="icon-overlay"><i class="fa-solid fa-camera fa-2x mb-1"></i><small>Capturar Vehículo</small></div>
+                                        <img id="in-foto-auto-img" src="">
+                                    </div>
+                                    <input type="hidden" id="in-foto-auto-data">
+                                </div>
+                            </div>
+                            
+                            <!-- Mensaje Peatón -->
+                            <div id="peaton-fields" style="display: none;" class="text-center p-4">
+                                <i class="fa-solid fa-person-walking fa-3x text-muted mb-2"></i>
+                                <h6 class="text-muted fw-bold">Ingreso Peatonal</h6>
+                                <p class="small text-muted">No se requieren datos de vehículo.</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- ACOMPAÑANTES -->
+                    <div class="border rounded p-3 my-3 bg-body-tertiary">
+                        <div class="d-flex justify-content-between align-items-center mb-3">
+                            <h6 class="m-0 fw-bold text-danger"><i class="fa-solid fa-users"></i> Acompañantes / Pasajeros</h6>
+                            <div style="width: 140px;">
+                                <div class="input-group input-group-sm">
+                                    <span class="input-group-text bg-secondary text-white">Cant.</span>
+                                    <input type="number" id="in-cant-personas" class="form-control text-center" value="0" min="0" max="10" onchange="renderPassengerFields()">
+                                </div>
+                            </div>
+                        </div>
+                        <div id="passengers-container" class="row g-2"></div>
+                    </div>
+
+                    <button type="submit" class="btn btn-danger w-100 btn-lg shadow-sm">Autorizar e Imprimir Ticket</button>
+                </form>
+            </div>
+
+            <!-- REGISTRO DE SALIDA -->
+            <div id="salida" class="app-section">
+                <div class="card shadow-sm border-0 p-3 mb-3">
+                    <h5 class="fw-bold mb-2 text-danger">Procesar Salida del Predio</h5>
+                    <p class="small text-muted mb-2">Puede buscar por el número de <b>Chapa</b> (Vehículos) o número de <b>Cédula</b> (Peatones).</p>
+                    <div class="input-group">
+                        <input type="text" id="out-search-chapa" class="form-control text-uppercase fw-bold" placeholder="Digite Chapa o Cédula...">
+                        <button class="btn btn-danger" type="button" onclick="buscarSalida()"><i class="fa-solid fa-search"></i> Buscar</button>
+                    </div>
+                </div>
+
+                <div id="out-details" class="card shadow-sm border-0 p-3" style="display:none;">
+                    <div class="row align-items-center">
+                        <div class="col-8">
+                            <h4 id="out-chapa" class="fw-bold m-0 text-success">---</h4>
+                            <p id="out-nombre" class="m-0 fs-5 fw-semibold">---</p>
+                            <small class="text-muted d-block mt-1">Ingreso: <span id="out-hora-in">--:--</span></small>
+                            <small class="text-muted d-block">Acompañantes: <span id="out-pasajeros-cuenta" class="badge bg-secondary">0</span></small>
+                        </div>
+                        <div class="col-4 text-end">
+                            <img id="out-foto" src="" class="img-fluid rounded border shadow-sm" style="max-height: 100px; width:100px; object-fit:cover;">
+                        </div>
+                    </div>
+                    <hr>
+                    <div class="mb-3">
+                        <label class="form-label small fw-bold">Comentarios de salida</label>
+                        <textarea id="out-obs" class="form-control" rows="2" placeholder="Novedades al retirar..."></textarea>
+                    </div>
+                    <button class="btn btn-success btn-lg w-100" onclick="procesarSalidaEfectiva()">Confirmar Salida del Predio</button>
+                    <input type="hidden" id="out-id">
+                </div>
+            </div>
+
+            <!-- AGENDAR VISITAS -->
+            <div id="agendar" class="app-section">
+                <form id="formAgendar" class="card shadow-sm border-0 p-3 mx-auto" style="max-width: 700px;">
+                    <h5 class="fw-bold text-success mb-3"><i class="fa-solid fa-calendar-plus"></i> Agendar Próxima Visita</h5>
+                    
+                    <div class="row mb-2">
+                        <div class="col-12 col-md-4 mb-2 mb-md-0">
+                            <label class="small fw-bold">Fecha de Visita *</label>
+                            <input type="date" id="ag-fecha" class="form-control form-control-sm" required>
+                        </div>
+                        <div class="col-12 col-md-4 mb-2 mb-md-0">
+                            <label class="small fw-bold">Hora de Llegada *</label>
+                            <input type="time" id="ag-hora" class="form-control form-control-sm" required>
+                        </div>
+                        <div class="col-12 col-md-4">
+                            <label class="small fw-bold text-danger">Demora Estimada (Minutos) *</label>
+                            <input type="number" id="ag-tiempo-est" class="form-control form-control-sm border-danger" placeholder="Ej: 45" required>
+                        </div>
+                    </div>
+
+                    <div class="mb-2 mt-2"><label class="small fw-bold">Nombre y Apellido *</label><input type="text" id="ag-nombre" class="form-control form-control-sm" required></div>
+                    <div class="mb-2"><label class="small fw-bold text-danger">Cédula de Identidad *</label><input type="text" id="ag-cedula" class="form-control form-control-sm border-danger" required></div>
+                    <div class="mb-3"><label class="small fw-bold">Empresa de procedencia</label><input type="text" id="ag-empresa" class="form-control form-control-sm"></div>
+                    
+                    <div class="row mb-2">
+                        <div class="col-12 col-md-6 mb-2 mb-md-0">
+                            <label class="small fw-bold">Tipo de Visita *</label>
+                            <select id="ag-tipo" class="form-select form-select-sm" required>
+                                <option value="" disabled selected>Seleccione el tipo...</option>
+                                <option value="PROVEEDOR">PROVEEDOR</option>
+                                <option value="ENTREVISTAS">ENTREVISTAS</option>
+                                <option value="PROVEEDOR DE SERVICIO">PROVEEDOR DE SERVICIO</option>
+                                <option value="PROVEEDOR TRABAJANDO">PROVEEDOR TRABAJANDO</option>
+                            </select>
+                        </div>
+                        <div class="col-12 col-md-6">
+                            <label class="small fw-bold">Departamento de Destino *</label>
+                            <input type="text" id="ag-departamento" class="form-control form-control-sm" placeholder="Ej: Recursos Humanos, TI..." required>
+                        </div>
+                    </div>
+                    
+                    <div class="mb-4"><label class="small fw-bold">Motivo detallado de la visita</label><input type="text" id="ag-motivo" class="form-control form-control-sm"></div>
+                    
+                    <button type="submit" class="btn btn-success w-100">Registrar y Agendar Visita</button>
+                </form>
+            </div>
+
+            <!-- LISTA NEGRA -->
+            <div id="blacklist-view" class="app-section">
+                <div class="row g-3">
+                    <div class="col-12 col-md-4">
+                        <form id="formBlacklist" class="card p-3 shadow-sm border-0 border-top border-danger border-4 bg-dark text-white">
+                            <h6 class="fw-bold text-danger mb-3"><i class="fa-solid fa-user-slash"></i> Bloquear Persona</h6>
+                            <p class="small text-light">Añadir a lista negra. El sistema impedirá su ingreso automáticamente.</p>
+                            <div class="mb-2"><label class="small fw-bold">Cédula *</label><input type="text" id="bl-cedula" class="form-control form-control-sm" required></div>
+                            <div class="mb-2"><label class="small fw-bold">Nombre Completo *</label><input type="text" id="bl-nombre" class="form-control form-control-sm" required></div>
+                            <div class="mb-3"><label class="small fw-bold">Motivo del Bloqueo *</label><textarea id="bl-motivo" class="form-control form-control-sm" rows="2" required></textarea></div>
+                            <button type="submit" class="btn btn-danger btn-sm w-100">Registrar en Lista Negra</button>
+                        </form>
+                    </div>
+                    <div class="col-12 col-md-8">
+                        <div class="card p-3 shadow-sm border-0">
+                            <h6 class="fw-bold mb-3 text-danger">Directorio de Personas Bloqueadas</h6>
+                            <div class="table-responsive">
+                                <table class="table table-sm table-hover align-middle" style="font-size: 13px;">
+                                    <thead class="table-dark"><tr><th>Cédula</th><th>Nombre</th><th>Motivo</th><th>Registrado Por</th><th>Acción</th></tr></thead>
+                                    <tbody id="blacklist-table-body"></tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- GESTIÓN DE USUARIOS -->
+            <div id="usuarios" class="app-section">
+                <div class="row g-3">
+                    <div class="col-12 col-md-4">
+                        <form id="formUsuario" class="card p-3 shadow-sm border-0">
+                            <h6 class="fw-bold text-primary mb-3"><i class="fa-solid fa-user-plus"></i> Crear Nuevo Operario</h6>
+                            <div class="mb-2"><label class="small fw-bold">Nombre Completo</label><input type="text" id="usr-nombre" class="form-control form-control-sm" required></div>
+                            <div class="mb-2"><label class="small fw-bold">Usuario (Login)</label><input type="text" id="usr-login" class="form-control form-control-sm" required></div>
+                            <div class="mb-2"><label class="small fw-bold">Contraseña</label><input type="password" id="usr-pass" class="form-control form-control-sm" required></div>
+                            <div class="mb-3">
+                                <label class="small fw-bold">Rol Asignado</label>
+                                <select id="usr-rol" class="form-select form-select-sm">
+                                    <option value="admin">Admin / Super Usuario</option>
+                                    <option value="guardia">Guardia Portería</option>
+                                    <option value="funcionario">Funcionario Autorizado</option>
+                                </select>
+                            </div>
+                            <button type="submit" class="btn btn-primary btn-sm w-100">Guardar Usuario</button>
+                        </form>
+                    </div>
+                    <div class="col-12 col-md-8">
+                        <div class="card p-3 shadow-sm border-0">
+                            <h6 class="fw-bold mb-3">Lista de Personal Registrado</h6>
+                            <div class="table-responsive">
+                                <table class="table table-sm table-hover align-middle" style="font-size: 13px;">
+                                    <thead class="table-light"><tr><th>Nombre</th><th>Usuario</th><th>Rol</th><th>Acción</th></tr></thead>
+                                    <tbody id="usuarios-table-body"></tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- HISTORIAL & BACKUP -->
+            <div id="consultas" class="app-section">
+                <div class="card shadow-sm border-0 p-3 mb-3 bg-light-subtle">
+                    <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+                        <h6 class="m-0 fw-bold">Historial y Auditoría Visual</h6>
+                        <div class="d-flex gap-2">
+                            <button class="btn btn-sm btn-success" onclick="exportarExcel()"><i class="fa-solid fa-file-excel"></i> Exportar XLSX</button>
+                            <button class="btn btn-sm btn-dark" onclick="exportarBackupBD()"><i class="fa-solid fa-download"></i> Backup BD</button>
+                            <button class="btn btn-sm btn-outline-dark" onclick="document.getElementById('import-db-file').click()"><i class="fa-solid fa-upload"></i> Restaurar BD</button>
+                        </div>
+                    </div>
+                    <input type="text" id="search-filter" class="form-control form-control-sm" placeholder="Buscar chapa, nombre, cédula..." oninput="cargarTablaHistorial()">
+                </div>
+                <div class="card shadow-sm border-0 p-2">
+                    <div class="table-responsive">
+                        <table class="table table-sm table-hover align-middle" style="font-size: 13px;">
+                            <thead class="table-light"><tr><th>Acceso / Fecha</th><th>Persona</th><th>Acompañantes</th><th>Estado</th><th class="text-center">Acciones</th></tr></thead>
+                            <tbody id="history-table-body"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- AUDITORIA -->
+            <div id="auditoria-view" class="app-section">
+                <div class="card shadow-sm border-0 border-start border-danger border-4 p-3 mb-3">
+                    <h5 class="fw-bold m-0"><i class="fa-solid fa-user-shield text-danger"></i> Bitácora de Auditoría y Trazabilidad</h5>
+                    <p class="text-muted small mb-0">Registro inalterable de eventos y modificaciones en el sistema.</p>
+                </div>
+                <div class="card shadow-sm border-0 p-2">
+                    <div class="table-responsive">
+                        <table class="table table-sm table-hover align-middle" style="font-size: 12px;">
+                            <thead class="table-dark"><tr><th>Fecha y Hora</th><th>Usuario / Operador</th><th>Acción</th><th>Detalle Técnico</th></tr></thead>
+                            <tbody id="auditoria-table-body"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+    <script>
+        // === 1. CONEXIÓN A SUPABASE ===
+        const SUPABASE_URL = "https://wzncntqgjdoumdmddgli.supabase.co";
+        const SUPABASE_KEY = "sb_publishable_ndYXJCwT0JZDNk6GG8WLrw_asmT5THq";
+        const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+        const FOTOS_BUCKET = "fotos-accesos";
+
+        async function logAuditoria(accion, detalle) {
+            const now = new Date();
+            const usuarioActual = activeUser ? activeUser.username : 'SISTEMA';
+            await sb.from('auditoria').insert({
+                timestamp: now.getTime(), fecha_hora: now.toLocaleString(),
+                usuario: usuarioActual, accion: accion, detalle: detalle
+            });
+        }
+
+        // Sube una imagen base64 (dataURL) al bucket de Supabase Storage
+        // y devuelve la URL pública para guardarla en el registro.
+        async function subirFotoSiExiste(dataUrl, prefijo) {
+            if (!dataUrl || !dataUrl.startsWith('data:')) return dataUrl || '';
+            try {
+                const res = await fetch(dataUrl);
+                const blob = await res.blob();
+                const nombreArchivo = `${prefijo}_${Date.now()}_${Math.floor(Math.random()*10000)}.jpg`;
+                const { error } = await sb.storage.from(FOTOS_BUCKET).upload(nombreArchivo, blob, { contentType: 'image/jpeg' });
+                if (error) { console.error("Error subiendo foto:", error); return ''; }
+                const { data } = sb.storage.from(FOTOS_BUCKET).getPublicUrl(nombreArchivo);
+                return data.publicUrl;
+            } catch (err) { console.error("Error procesando foto:", err); return ''; }
+        }
+
+        async function inicializarSistema() {
+            try {
+                const hoy = new Date().toISOString().split('T')[0];
+                if(document.getElementById('ag-fecha')) document.getElementById('ag-fecha').value = hoy;
+            } catch (error) { console.error(error); }
+        }
+        inicializarSistema();
+
+        let activeUser = null;
+        let chartInstance1 = null; let chartInstance2 = null;
+
+        // === 2. LOGIN & ROLES ===
+        document.getElementById('loginForm').addEventListener('submit', async function(e) {
+            e.preventDefault();
+            const u = document.getElementById('username').value.trim();
+            const p = document.getElementById('password').value.trim();
+            try {
+                const { data: user, error } = await sb
+                    .from('usuarios')
+                    .select('*')
+                    .ilike('username', u)
+                    .eq('password', p)
+                    .maybeSingle();
+                if (user) {
+                    activeUser = user; await logAuditoria("LOGIN_EXITOSO", `Inicio de sesión.`);
+                    document.getElementById('login-screen').style.display = 'none'; document.getElementById('wrapper').style.display = 'flex';
+                    document.getElementById('user-display-name').innerText = user.nombre; document.getElementById('user-role-badge').innerText = user.rol.toUpperCase();
+                    construirMenusPorRol(user.rol);
+                } else { alert("Usuario o Contraseña incorrectos."); await logAuditoria("LOGIN_FALLIDO", `Intento fallido: ${u}`); }
+            } catch(error) { console.error(error); alert("Error validando el usuario."); }
+        });
+
+        function logout() { logAuditoria("LOGOUT", `Cierre de sesión.`).then(() => { location.reload(); }); }
+
+        function construirMenusPorRol(rol) {
+            const sidebar = document.getElementById('sidebar-menu'); const bottom = document.getElementById('bottom-nav');
+            sidebar.innerHTML = ''; bottom.innerHTML = '';
+            
+            let opciones = [];
+            if (rol === 'admin') {
+                opciones = [{ id:'dashboard', label:'Dashboard', icon:'fa-chart-pie' }, { id:'ingreso', label:'Entradas', icon:'fa-door-open' }, { id:'salida', label:'Salidas', icon:'fa-door-closed' }, { id:'agendar', label:'Agendar Visita', icon:'fa-calendar-alt' }, { id:'blacklist-view', label:'Lista Negra', icon:'fa-user-slash' }, { id:'usuarios', label:'Usuarios', icon:'fa-users-gear' }, { id:'consultas', label:'Historial y BD', icon:'fa-database' }, { id:'auditoria-view', label:'Auditoría', icon:'fa-user-shield' }];
+            } else if (rol === 'guardia') {
+                opciones = [{ id:'ingreso', label:'Entradas', icon:'fa-door-open' }, { id:'salida', label:'Salidas', icon:'fa-door-closed' }, { id:'consultas', label:'Historial', icon:'fa-database' }];
+            } else if (rol === 'funcionario') {
+                opciones = [{ id:'agendar', label:'Agendar Visita', icon:'fa-calendar-alt' }, { id:'blacklist-view', label:'Lista Negra', icon:'fa-user-slash' }];
+            }
+
+            opciones.forEach((op, index) => {
+                const aLink = document.createElement('a'); aLink.className = `nav-link ${index === 0 ? 'active' : ''}`; aLink.onclick = () => navigate(op.id);
+                aLink.innerHTML = `<i class="fa-solid ${op.icon} me-3"></i> ${op.label}`; sidebar.appendChild(aLink);
+                const mLink = document.createElement('a'); mLink.className = `nav-link ${index === 0 ? 'active' : ''}`; mLink.onclick = () => navigate(op.id);
+                mLink.innerHTML = `<i class="fa-solid ${op.icon}"></i>${op.label}`; bottom.appendChild(mLink);
+            });
+            navigate(opciones[0].id);
+        }
+
+        function navigate(sectionId) {
+            document.querySelectorAll('.app-section').forEach(el => el.classList.remove('active'));
+            document.querySelectorAll('.nav-link').forEach(el => el.classList.remove('active'));
+            document.getElementById(sectionId).classList.add('active');
+            document.querySelectorAll(`[onclick="navigate('${sectionId}')"]`).forEach(el => el.classList.add('active'));
+
+            if (sectionId === 'dashboard') actualizarDashboard(); if (sectionId === 'consultas') cargarTablaHistorial();
+            if (sectionId === 'usuarios') cargarTablaUsuarios(); if (sectionId === 'auditoria-view') cargarTablaAuditoria();
+            if (sectionId === 'blacklist-view') cargarTablaBlacklist();
+        }
+
+        function toggleTheme() { const html = document.documentElement; html.setAttribute('data-bs-theme', html.getAttribute('data-bs-theme') === 'light' ? 'dark' : 'light'); }
+
+        // === 4. CÁMARA Y VISOR DE IMÁGENES (LIGHTBOX) ===
+        let targetImgId = null, targetInputId = null;
+        function openNativeCamera(imgId, inputId) { targetImgId = imgId; targetInputId = inputId; document.getElementById('native-camera-input').click(); }
+        document.getElementById('native-camera-input').addEventListener('change', function(e) {
+            const file = e.target.files[0]; if(!file) return; const reader = new FileReader();
+            reader.onload = function(event) {
+                const img = new Image();
+                img.onload = function() {
+                    const canvas = document.createElement('canvas'); const scale = 800 / img.width;
+                    canvas.width = 800; canvas.height = img.height * scale;
+                    const ctx = canvas.getContext('2d'); ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+                    const b64 = canvas.toDataURL('image/jpeg', 0.6);
+                    document.getElementById(targetImgId).src = b64; document.getElementById(targetInputId).value = b64;
+                }
+                img.src = event.target.result;
+            }
+            reader.readAsDataURL(file); e.target.value = ''; 
+        });
+
+        // Funciones del Visor Lightbox
+        function abrirImagen(src) {
+            if(!src) return;
+            document.getElementById('lightbox-img').src = src;
+            document.getElementById('lightbox').style.display = 'flex';
+        }
+        function cerrarImagen(event) {
+            if(event) event.preventDefault();
+            document.getElementById('lightbox').style.display = 'none';
+            document.getElementById('lightbox-img').src = '';
+        }
+
+        // Toggle Vehículo vs Peatón
+        function toggleVehiculoFields() {
+            const hasVehicle = document.getElementById('in-con-vehiculo').checked;
+            const containerVehiculo = document.getElementById('vehiculo-fields');
+            const containerPeaton = document.getElementById('peaton-fields');
+            const chapaInput = document.getElementById('in-chapa');
+
+            if (hasVehicle) {
+                containerVehiculo.style.display = 'block'; containerPeaton.style.display = 'none';
+                chapaInput.setAttribute('required', 'required');
+            } else {
+                containerVehiculo.style.display = 'none'; containerPeaton.style.display = 'block';
+                chapaInput.removeAttribute('required');
+            }
+        }
+        
+        function renderPassengerFields() {
+            const container = document.getElementById('passengers-container');
+            const count = parseInt(document.getElementById('in-cant-personas').value) || 0;
+            container.innerHTML = '';
+            for (let i = 1; i <= count; i++) {
+                container.innerHTML += `<div class="col-12 col-md-6 mb-3 p-2 border rounded bg-light-subtle"><span class="badge bg-dark mb-2">Acompañante #${i}</span><input type="text" id="pas-nombre-${i}" class="form-control form-control-sm mb-1" placeholder="Nombre *" required><input type="text" id="pas-apellido-${i}" class="form-control form-control-sm mb-1" placeholder="Apellido *" required><input type="text" id="pas-ci-${i}" class="form-control form-control-sm mb-2" placeholder="Nro de Cédula *" required><label class="small d-block text-muted mb-1 fw-bold">Documento C.I.</label><div class="photo-slot mx-auto" style="height:100px; max-width:180px;" onclick="openNativeCamera('pas-img-ci-${i}', 'pas-data-ci-${i}')"><div class="icon-overlay"><i class="fa-solid fa-camera fa-2x mb-1"></i></div><img id="pas-img-ci-${i}" src=""></div><input type="hidden" id="pas-data-ci-${i}"></div>`;
+            }
+        }
+
+        // === 6. INGRESO Y SALIDA ===
+        async function buscarAgendamiento() {
+            const ci = document.getElementById('search-agendado-ci').value.trim(); if(!ci) return;
+            const { data: hit } = await sb.from('agendamientos').select('*').eq('cedula', ci).eq('estado', 'Pendiente').limit(1).maybeSingle();
+            if(hit) {
+                document.getElementById('in-nombre').value = hit.nombre; document.getElementById('in-cedula').value = hit.cedula;
+                document.getElementById('in-empresa').value = hit.empresa; document.getElementById('in-motivo').value = `[${hit.tipo}] Depto: ${hit.departamento} | ${hit.motivo}`;
+                alert(`Visita localizada.\nProgramada para las ${hit.hora}.\nTiempo Estimado de estadía: ${hit.tiempo_est} minutos.`);
+            } else { alert("No hay agendamiento pendiente para esta cédula."); }
+        }
+
+        function imprimirTicket(record) {
+            const ventana = window.open('', '_blank', 'width=350,height=500');
+            ventana.document.write(`
+                <html><head><title>Ticket Visita PF</title>
+                <style>body { font-family: 'Segoe UI', sans-serif; text-align: center; padding: 15px; color: #000; } .ticket { border: 2px dashed #dc3545; padding: 15px; margin: 0 auto; max-width: 300px; } h3 { margin: 0 0 10px 0; font-size: 18px; color: #dc3545; } .data { text-align: left; font-size: 14px; margin-bottom: 5px; border-bottom: 1px dotted #ccc; padding-bottom: 5px; } .footer { font-size: 11px; margin-top: 15px; text-align: center; font-weight: bold; }</style>
+                </head><body>
+                <div class="ticket"><h3>🏢 PUNTO FARMA ACCESS</h3>
+                    <div class="data"><strong>Fecha:</strong> ${record.fecha} ${record.hora_ingreso}</div>
+                    <div class="data"><strong>Visitante:</strong> ${record.nombre}</div>
+                    <div class="data"><strong>C.I.:</strong> ${record.cedula}</div>
+                    <div class="data"><strong>Acceso:</strong> ${record.con_vehiculo ? record.chapa : 'PEATÓN (Caminando)'}</div>
+                    <div class="data"><strong>Destino:</strong> ${record.motivo}</div>
+                    <div class="data"><strong>Operador:</strong> ${record.operador_registro}</div>
+                    <div class="footer">Conserve este ticket durante su permanencia en el predio.</div>
+                </div><script>setTimeout(() => { window.print(); window.close(); }, 500);<\/script></body></html>
+            `);
+        }
+
+        document.getElementById('formIngreso').addEventListener('submit', async function(e) {
+            e.preventDefault();
+            const ci = document.getElementById('in-cedula').value.trim();
+            const submitBtn = this.querySelector('button[type="submit"]');
+            submitBtn.disabled = true; submitBtn.innerText = 'Procesando...';
+
+            try {
+                const { data: personaBloqueada } = await sb.from('blacklist').select('*').eq('cedula', ci).maybeSingle();
+                if (personaBloqueada) { alert(`🛑 ALERTA DE SEGURIDAD: Persona en LISTA NEGRA.\n\nMotivo: ${personaBloqueada.motivo}\nRegistrado por: ${personaBloqueada.registrado_por}\n\nINGRESO DENEGADO.`); await logAuditoria("INTENTO_BLOQUEADO", `CI: ${ci} intentó ingresar. Bloqueado por Lista Negra.`); submitBtn.disabled = false; submitBtn.innerText = 'Autorizar e Imprimir Ticket'; return; }
+
+                const hasVehicle = document.getElementById('in-con-vehiculo').checked;
+
+                if (hasVehicle) {
+                    const { data: recordsAdentro } = await sb.from('registros').select('con_vehiculo').eq('estado', 'Adentro');
+                    const autosAdentro = (recordsAdentro || []).filter(r => r.con_vehiculo === true).length;
+                    if (autosAdentro >= 100) { alert("🛑 LÍMITE DE ESTACIONAMIENTO (100 vehículos) ALCANZADO.\nEl vehículo no puede ingresar."); await logAuditoria("BLOQUEO_CAPACIDAD", `Intento de ingreso denegado para CI: ${ci}. Estacionamiento lleno.`); submitBtn.disabled = false; submitBtn.innerText = 'Autorizar e Imprimir Ticket'; return; }
+                }
+
+                const now = new Date();
+                const pasajerosLista = [];
+                for (let i = 1; i <= (parseInt(document.getElementById('in-cant-personas').value) || 0); i++) {
+                    const fotoPasajero = await subirFotoSiExiste(document.getElementById(`pas-data-ci-${i}`).value, `pasajero_${ci}`);
+                    pasajerosLista.push({ nombre: document.getElementById(`pas-nombre-${i}`).value, apellido: document.getElementById(`pas-apellido-${i}`).value, cedula: document.getElementById(`pas-ci-${i}`).value, foto_ci: fotoPasajero });
+                }
+
+                const fotoCiUrl = await subirFotoSiExiste(document.getElementById('in-foto-ci-data').value, `ci_${ci}`);
+                const fotoAutoUrl = hasVehicle ? await subirFotoSiExiste(document.getElementById('in-foto-auto-data').value, `auto_${ci}`) : '';
+
+                const record = {
+                    nombre: document.getElementById('in-nombre').value, cedula: ci,
+                    empresa: document.getElementById('in-empresa').value || 'Particular', motivo: document.getElementById('in-motivo').value || 'Visita',
+                    con_vehiculo: hasVehicle,
+                    chapa: hasVehicle ? document.getElementById('in-chapa').value.toUpperCase().replace(/\s+/g, '') : 'PEATÓN',
+                    marca: hasVehicle ? document.getElementById('in-marca').value : 'N/A', tipo_vehiculo: hasVehicle ? document.getElementById('in-tipo').value : 'Peatón',
+                    observaciones_in: hasVehicle ? document.getElementById('in-obs').value : '',
+                    foto_ci: fotoCiUrl, foto_auto: fotoAutoUrl,
+                    pasajeros: pasajerosLista, fecha: now.toISOString().split('T')[0], hora_ingreso: now.toTimeString().split(' ')[0].substring(0,5),
+                    timestamp_in: now.getTime(), operador_registro: activeUser.username, estado: 'Adentro'
+                };
+
+                const { data: inserted, error } = await sb.from('registros').insert(record).select().single();
+                if (error) { console.error(error); alert("Error guardando el registro."); submitBtn.disabled = false; submitBtn.innerText = 'Autorizar e Imprimir Ticket'; return; }
+
+                await logAuditoria("INGRESO_AUTORIZADO", `Ingreso de ${record.nombre} (Medio: ${hasVehicle ? record.chapa : 'Peatonal'}).`);
+
+                const { data: ag } = await sb.from('agendamientos').select('id').eq('cedula', record.cedula).maybeSingle();
+                if(ag) await sb.from('agendamientos').update({ estado: 'Ingresado' }).eq('id', ag.id);
+
+                alert("Ingreso Oficial Autorizado. Generando Ticket...");
+                imprimirTicket(inserted);
+
+                this.reset(); document.getElementById('passengers-container').innerHTML = '';
+                document.querySelectorAll('.photo-slot img').forEach(i => i.src = ''); document.querySelectorAll('input[type="hidden"]').forEach(h => h.value = '');
+                toggleVehiculoFields();
+            } finally {
+                submitBtn.disabled = false; submitBtn.innerText = 'Autorizar e Imprimir Ticket';
+            }
+        });
+
+        async function buscarSalida() {
+            const searchVal = document.getElementById('out-search-chapa').value.toUpperCase().trim();
+            const { data: recordsAdentro } = await sb.from('registros').select('*').eq('estado', 'Adentro');
+            const hit = (recordsAdentro || []).find(r => (r.chapa || '').toUpperCase() === searchVal || r.cedula === searchVal);
+
+            if (hit) {
+                document.getElementById('out-id').value = hit.id; 
+                document.getElementById('out-chapa').innerText = hit.con_vehiculo ? hit.chapa : `Peatón: ${hit.cedula}`;
+                document.getElementById('out-nombre').innerText = hit.nombre; document.getElementById('out-hora-in').innerText = hit.hora_ingreso;
+                document.getElementById('out-pasajeros-cuenta').innerText = hit.pasajeros ? hit.pasajeros.length : 0;
+                document.getElementById('out-foto').src = hit.foto_ci || hit.foto_auto || 'https://via.placeholder.com/100';
+                document.getElementById('out-details').style.display = 'block';
+            } else { alert("No se encontró ninguna persona o vehículo dentro del predio con ese dato."); }
+        }
+
+        async function procesarSalidaEfectiva() {
+            const id = parseInt(document.getElementById('out-id').value);
+            const now = new Date();
+            const { data: hit } = await sb.from('registros').select('*').eq('id', id).single();
+            const mins = Math.floor((now.getTime() - hit.timestamp_in) / 60000);
+
+            await sb.from('registros').update({ estado: 'Salió', hora_salida: now.toTimeString().split(' ')[0].substring(0,5), tiempo_permanencia_min: mins, observaciones_out: document.getElementById('out-obs').value }).eq('id', id);
+            await logAuditoria("SALIDA", `Salida procesada: ${hit.nombre}. Perm: ${mins}m`);
+            alert(`Salida confirmada. Tiempo en predio: ${mins} mins.`);
+            document.getElementById('out-details').style.display = 'none'; document.getElementById('out-search-chapa').value = ''; document.getElementById('out-obs').value = '';
+        }
+
+        // === 8. ADMINISTRACIÓN ===
+        document.getElementById('formAgendar').addEventListener('submit', async function(e) {
+            e.preventDefault(); const agCedula = document.getElementById('ag-cedula').value;
+            await sb.from('agendamientos').insert({
+                fecha: document.getElementById('ag-fecha').value, hora: document.getElementById('ag-hora').value,
+                tiempo_est: document.getElementById('ag-tiempo-est').value,
+                nombre: document.getElementById('ag-nombre').value, cedula: agCedula,
+                empresa: document.getElementById('ag-empresa').value, tipo: document.getElementById('ag-tipo').value, 
+                departamento: document.getElementById('ag-departamento').value, motivo: document.getElementById('ag-motivo').value,
+                estado: 'Pendiente'
+            });
+            await logAuditoria("NUEVO_AGENDAMIENTO", `Agendado CI: ${agCedula}`);
+            alert("Visita agendada exitosamente."); this.reset(); document.getElementById('ag-fecha').value = new Date().toISOString().split('T')[0];
+        });
+
+        document.getElementById('formBlacklist').addEventListener('submit', async function(e) { e.preventDefault(); const ci = document.getElementById('bl-cedula').value; await sb.from('blacklist').insert({ cedula: ci, nombre: document.getElementById('bl-nombre').value, motivo: document.getElementById('bl-motivo').value, registrado_por: activeUser.username, fecha: new Date().toLocaleDateString() }); await logAuditoria("ADD_BLACKLIST", `CI: ${ci} añadida a lista negra.`); alert("Persona bloqueada exitosamente."); this.reset(); cargarTablaBlacklist(); });
+        async function cargarTablaBlacklist() { const { data: list } = await sb.from('blacklist').select('*').order('id', { ascending: false }); const tbody = document.getElementById('blacklist-table-body'); tbody.innerHTML = ''; (list || []).forEach(b => { tbody.innerHTML += `<tr><td><span class="badge bg-danger">${b.cedula}</span></td><td>${b.nombre}</td><td>${b.motivo}</td><td><small>${b.registrado_por}</small></td><td><button class="btn btn-sm btn-outline-danger py-0" onclick="quitarBlacklist(${b.id}, '${b.cedula}')">Desbloquear</button></td></tr>`; }); }
+        async function quitarBlacklist(id, ci) { if(confirm("¿Eliminar de lista negra y permitir ingreso?")) { await sb.from('blacklist').delete().eq('id', id); await logAuditoria("REMOVE_BLACKLIST", `CI: ${ci} removida de lista negra.`); cargarTablaBlacklist(); } }
+
+        document.getElementById('formUsuario').addEventListener('submit', async function(e) { e.preventDefault(); const usrLogin = document.getElementById('usr-login').value; await sb.from('usuarios').insert({ nombre: document.getElementById('usr-nombre').value, username: usrLogin, password: document.getElementById('usr-pass').value, rol: document.getElementById('usr-rol').value }); await logAuditoria("NUEVO_USUARIO", `Usuario: ${usrLogin}`); alert("Usuario creado."); this.reset(); cargarTablaUsuarios(); });
+        async function cargarTablaUsuarios() { const { data: list } = await sb.from('usuarios').select('*').order('id'); const tbody = document.getElementById('usuarios-table-body'); tbody.innerHTML = ''; (list || []).forEach(u => { tbody.innerHTML += `<tr><td>${u.nombre}</td><td><code>${u.username}</code></td><td><span class="badge bg-secondary">${u.rol}</span></td><td><button class="btn btn-sm btn-danger py-0" onclick="eliminarUsuario(${u.id}, '${u.username}')">Borrar</button></td></tr>`; }); }
+        async function eliminarUsuario(id, username) { if(confirm("¿Eliminar usuario?")) { await sb.from('usuarios').delete().eq('id', id); await logAuditoria("DEL_USUARIO", `Eliminado: ${username}`); cargarTablaUsuarios(); } }
+
+        // === 9. DASHBOARD Y REPORTES ===
+        async function actualizarDashboard() {
+            const hoyStr = new Date().toISOString().split('T')[0];
+            const { data: recordsData } = await sb.from('registros').select('*');
+            const { data: agendamientosData } = await sb.from('agendamientos').select('*');
+            const records = recordsData || []; const agendamientos = agendamientosData || [];
+            const adentroRecords = records.filter(r => r.estado === 'Adentro');
+            
+            document.getElementById('kpi-agendados').innerText = agendamientos.filter(a => a.fecha === hoyStr && a.estado === 'Pendiente').length;
+            document.getElementById('kpi-ingresos').innerText = records.filter(r => r.fecha === hoyStr).length;
+
+            let totalPersonasAdentro = 0; const personasPorTipo = {};
+            adentroRecords.forEach(r => {
+                const cantPersonas = 1 + (r.pasajeros ? r.pasajeros.length : 0);
+                totalPersonasAdentro += cantPersonas; personasPorTipo[r.tipo_vehiculo] = (personasPorTipo[r.tipo_vehiculo] || 0) + cantPersonas;
+            });
+
+            document.getElementById('kpi-personas-dentro').innerText = `${totalPersonasAdentro} Personas`;
+            const desgloseContainer = document.getElementById('kpi-personas-desglose'); desgloseContainer.innerHTML = '';
+            if (totalPersonasAdentro === 0) { desgloseContainer.innerHTML = `<span class="badge bg-light text-dark border">Predio Vacío</span>`; } 
+            else { for (const [tipo, cant] of Object.entries(personasPorTipo)) { desgloseContainer.innerHTML += `<span class="badge bg-dark fs-6 border">${tipo}: ${cant}</span>`; } }
+
+            const autosAdentro = adentroRecords.filter(r => r.con_vehiculo === true).length;
+            const porcentaje = (autosAdentro / 100) * 100;
+            document.getElementById('kpi-dentro').innerText = autosAdentro;
+            let semaforoClass = 'bg-success'; if (porcentaje >= 80 && porcentaje < 100) semaforoClass = 'bg-warning'; if (porcentaje >= 100) semaforoClass = 'bg-danger';
+            document.getElementById('kpi-semaforo').className = `progress-bar ${semaforoClass}`; document.getElementById('kpi-semaforo').style.width = `${Math.min(porcentaje, 100)}%`;
+            document.getElementById('kpi-semaforo-text').innerText = `${autosAdentro} / 100 Límite Autos`;
+
+            document.getElementById('kpi-salidas').innerText = records.filter(r => r.fecha === hoyStr && r.estado === 'Salió').length;
+            const salidasTiempo = records.filter(r => r.estado === 'Salió' && r.tiempo_permanencia_min != null);
+            document.getElementById('kpi-tiempo').innerText = (salidasTiempo.length ? Math.round(salidasTiempo.reduce((s, r) => s + r.tiempo_permanencia_min, 0) / salidasTiempo.length) : 0) + "m";
+            
+            if(chartInstance1) chartInstance1.destroy(); if(chartInstance2) chartInstance2.destroy();
+            const mapDia = {}, mapTipo = {};
+            records.forEach(r => { mapDia[r.fecha] = (mapDia[r.fecha]||0)+1; mapTipo[r.tipo_vehiculo] = (mapTipo[r.tipo_vehiculo]||0)+1; });
+
+            chartInstance1 = new Chart(document.getElementById('chartIngresos'), { type: 'bar', data: { labels: Object.keys(mapDia).slice(-7), datasets: [{ label: 'Ingresos', data: Object.values(mapDia).slice(-7), backgroundColor: '#dc3545' }] }});
+            chartInstance2 = new Chart(document.getElementById('chartTipos'), { type: 'doughnut', data: { labels: Object.keys(mapTipo), datasets: [{ data: Object.values(mapTipo), backgroundColor: ['#198754', '#ffc107', '#0dcaf0', '#6f42c1', '#fd7e14'] }] }});
+        }
+
+        // === HISTORIAL CON MODAL DE DETALLES Y FOTOS ===
+        async function cargarTablaHistorial() {
+            const fltr = document.getElementById('search-filter').value.toLowerCase();
+            const { data: recordsData } = await sb.from('registros').select('*').order('id', { ascending: false });
+            const records = recordsData || [];
+            const tbody = document.getElementById('history-table-body'); tbody.innerHTML = '';
+            records.filter(r => r.nombre.toLowerCase().includes(fltr) || (r.chapa || '').toLowerCase().includes(fltr) || r.cedula.includes(fltr)).forEach(r => {
+                const trLabel = r.con_vehiculo ? r.chapa : `<i class="fa-solid fa-person-walking"></i> PEATÓN`;
+                tbody.innerHTML += `<tr>
+                    <td><span class="fw-bold text-uppercase">${trLabel}</span><br><small class="text-muted">${r.fecha}</small></td>
+                    <td>${r.nombre}</td><td class="text-center">${r.pasajeros ? r.pasajeros.length : 0}</td>
+                    <td><span class="badge bg-${r.estado==='Adentro'?'warning text-dark':'success'}">${r.estado}</span></td>
+                    <td class="text-center"><button class="btn btn-sm btn-outline-danger" onclick="verDetalleRegistro(${r.id})" title="Ver Detalles"><i class="fa-solid fa-eye"></i> Ver</button></td>
+                </tr>`;
+            });
+        }
+
+        // FUNCIÓN PARA ABRIR EL MODAL DE DETALLE COMPLETO
+        async function verDetalleRegistro(id) {
+            const { data: r } = await sb.from('registros').select('*').eq('id', id).single();
+            if(!r) return;
+
+            let html = `
+                <div class="row g-3">
+                    <div class="col-md-6">
+                        <h6 class="fw-bold text-danger border-bottom pb-1">Datos Principales</h6>
+                        <p class="mb-1 small"><b>Nombre:</b> ${r.nombre}</p>
+                        <p class="mb-1 small"><b>Cédula:</b> ${r.cedula}</p>
+                        <p class="mb-1 small"><b>Empresa:</b> ${r.empresa || 'Particular'}</p>
+                        <p class="mb-1 small"><b>Motivo / Destino:</b> ${r.motivo}</p>
+                        <p class="mb-1 small"><b>Hora Ingreso:</b> ${r.hora_ingreso}</p>
+                        <p class="mb-1 small"><b>Hora Salida:</b> ${r.hora_salida || '<span class="text-warning fw-bold">Aún en predio</span>'}</p>
+                        <p class="mb-1 small"><b>Operador Registro:</b> ${r.operador_registro}</p>
+                    </div>
+                    <div class="col-md-6">
+                        <h6 class="fw-bold text-danger border-bottom pb-1">Datos del Medio de Ingreso</h6>
+                        <p class="mb-1 small"><b>Medio:</b> ${r.con_vehiculo ? 'Vehículo' : 'Peatonal'}</p>
+                        <p class="mb-1 small"><b>Chapa:</b> ${r.chapa}</p>
+                        <p class="mb-1 small"><b>Marca/Modelo:</b> ${r.marca}</p>
+                        <p class="mb-1 small"><b>Clasificación:</b> ${r.tipo_vehiculo}</p>
+                        <p class="mb-1 small"><b>Observaciones Entrada:</b> ${r.observaciones_in || 'Ninguna'}</p>
+                        <p class="mb-1 small"><b>Observaciones Salida:</b> ${r.observaciones_out || 'Ninguna'}</p>
+                    </div>
+                </div>
+
+                <h6 class="fw-bold text-danger border-bottom pb-1 mt-4">Evidencia Fotográfica (Click para Ampliar)</h6>
+                <div class="d-flex gap-3 flex-wrap">
+            `;
+            
+            if(r.foto_ci) {
+                html += `<div><small class="d-block text-muted mb-1 text-center">C.I. Principal</small><img src="${r.foto_ci}" class="thumb-img shadow-sm" onclick="abrirImagen('${r.foto_ci}')"></div>`;
+            } else {
+                html += `<div><small class="text-muted">Sin foto C.I.</small></div>`;
+            }
+
+            if(r.foto_auto) {
+                html += `<div><small class="d-block text-muted mb-1 text-center">Vehículo / Chapa</small><img src="${r.foto_auto}" class="thumb-img shadow-sm" onclick="abrirImagen('${r.foto_auto}')"></div>`;
+            }
+
+            html += `</div>`;
+
+            if(r.pasajeros && r.pasajeros.length > 0) {
+                html += `<h6 class="fw-bold text-danger border-bottom pb-1 mt-4">Acompañantes / Pasajeros (${r.pasajeros.length})</h6><div class="row g-2">`;
+                r.pasajeros.forEach((p, idx) => {
+                    html += `
+                    <div class="col-12 col-md-4">
+                        <div class="p-2 border rounded bg-light text-center h-100 shadow-sm">
+                            <p class="mb-1 small fw-bold">${p.nombre} ${p.apellido}</p>
+                            <p class="mb-1 small text-muted">CI: ${p.cedula}</p>
+                            ${p.foto_ci ? `<img src="${p.foto_ci}" class="thumb-img mx-auto mt-2 shadow-sm" onclick="abrirImagen('${p.foto_ci}')">` : '<small class="text-muted mt-2 d-block">Sin foto</small>'}
+                        </div>
+                    </div>`;
+                });
+                html += `</div>`;
+            }
+
+            document.getElementById('modalDetalleCuerpo').innerHTML = html;
+            
+            // Instanciar y mostrar el Modal usando Bootstrap
+            const modalElement = document.getElementById('modalDetalle');
+            const modalInstance = new bootstrap.Modal(modalElement);
+            modalInstance.show();
+        }
+
+        async function cargarTablaAuditoria() {
+            const { data: logsData } = await sb.from('auditoria').select('*').order('id', { ascending: false }).limit(100);
+            const logs = logsData || []; const tbody = document.getElementById('auditoria-table-body'); tbody.innerHTML = '';
+            logs.forEach(log => { tbody.innerHTML += `<tr><td class="text-nowrap">${log.fecha_hora}</td><td><span class="badge bg-secondary">${log.usuario}</span></td><td class="fw-bold text-danger">${log.accion}</td><td>${log.detalle}</td></tr>`; });
+        }
+
+        // === 10. EXPORTACIÓN BD ===
+        async function exportarExcel() {
+            const { data } = await sb.from('registros').select('*'); await logAuditoria("EXPORT_EXCEL", `Historial exportado.`);
+            const ws = XLSX.utils.json_to_sheet((data || []).map(r => ({ "Fecha": r.fecha, "Medio": r.con_vehiculo ? 'Vehículo' : 'Peatón', "Chapa": r.chapa, "Conductor/Persona": r.nombre, "Cédula": r.cedula, "Empresa": r.empresa, "Tipo": r.tipo_vehiculo, "Destino": r.motivo, "Entrada": r.hora_ingreso, "Salida": r.hora_salida || '', "Perm(Min)": r.tiempo_permanencia_min || '', "Operador": r.operador_registro })));
+            const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, "Accesos"); XLSX.writeFile(wb, `PFAccess_Reporte_${new Date().getTime()}.xlsx`);
+        }
+        async function exportarBackupBD() {
+            const { data: usuarios } = await sb.from('usuarios').select('*');
+            const { data: registros } = await sb.from('registros').select('*');
+            const { data: agendamientos } = await sb.from('agendamientos').select('*');
+            const { data: auditoria } = await sb.from('auditoria').select('*');
+            const { data: blacklist } = await sb.from('blacklist').select('*');
+            const todo = { usuarios, registros, agendamientos, auditoria, blacklist };
+            const blob = new Blob([JSON.stringify(todo)], {type: "application/json"}); const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+            a.download = `PFAccess_DB_Backup_${new Date().toISOString().split('T')[0]}.json`; a.click(); await logAuditoria("BACKUP_EXPORT", "Copia de seguridad exportada desde la nube.");
+        }
+        function procesarImportacionBD(e) {
+            const file = e.target.files[0]; if(!file) return; const reader = new FileReader();
+            reader.onload = async function(event) {
+                try {
+                    const data = JSON.parse(event.target.result);
+                    if(confirm("⚠️ ADVERTENCIA: Esta acción sobrescribirá la base de datos actual con la del archivo. ¿Continuar?")) {
+                        if (data.usuarios && data.usuarios.length) await sb.from('usuarios').insert(data.usuarios.map(({id, ...rest}) => rest));
+                        if (data.registros && data.registros.length) await sb.from('registros').insert(data.registros.map(({id, ...rest}) => rest));
+                        if (data.agendamientos && data.agendamientos.length) await sb.from('agendamientos').insert(data.agendamientos.map(({id, ...rest}) => rest));
+                        if (data.auditoria && data.auditoria.length) await sb.from('auditoria').insert(data.auditoria.map(({id, ...rest}) => rest));
+                        if (data.blacklist && data.blacklist.length) await sb.from('blacklist').insert(data.blacklist.map(({id, ...rest}) => rest));
+                        alert("✅ Datos importados correctamente. El sistema se reiniciará."); location.reload();
+                    }
+                } catch(err) { console.error(err); alert("Error al leer el archivo. Asegúrese de que sea un Backup de PFAccess válido."); }
+            }; reader.readAsText(file); e.target.value = '';
+        }
+    </script>
+</body>
+</html>
